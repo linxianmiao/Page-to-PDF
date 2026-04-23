@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(brew install *)",
+      "Bash(pdftoppm -f 1 -l 6 -r 72 \"/Users/linxianmiao/Downloads/仟传网络 — 海外红人 ip 整合营销服务能力介绍 — 2026-04-21 \\(4\\).pdf\" /tmp/p2p_check -png)",
+      "Read(//private/tmp/**)"
+    ]
+  }
+}

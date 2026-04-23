@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>Page2PDF — 分割线编辑器</title>
+<style>
+  :root {
+    --bg: #0e1013;
+    --bg-elev: #161a1f;
+    --bg-input: #1c2128;
+    --border: #262c35;
+    --border-strong: #38404c;
+    --text: #e6e8eb;
+    --text-dim: #8b93a1;
+    --text-faint: #5a6372;
+    --accent: #f5a524;
+    --accent-soft: #f5a52420;
+    --danger: #ef4444;
+    --ok: #22c55e;
+    --mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 13px;
+    height: 100vh;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ===== Shell ===== */
+  .shell {
+    display: grid;
+    grid-template-columns: 1fr 320px;
+    grid-template-rows: 48px 1fr;
+    height: 100vh;
+  }
+  .topbar {
+    grid-column: 1 / -1;
+    display: flex; align-items: center;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-elev);
+    gap: 12px;
+  }
+  .brand { font-weight: 600; font-size: 13px; }
+  .brand .dot {
+    display: inline-block; width: 8px; height: 8px;
+    background: var(--accent); border-radius: 50%;
+    margin-right: 8px; vertical-align: middle;
+  }
+  .brand .sub {
+    color: var(--text-faint);
+    font-family: var(--mono);
+    font-size: 11px;
+    margin-left: 10px;
+    letter-spacing: 0.05em;
+  }
+  .topbar .spacer { flex: 1; }
+  .topbar .hint {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+  .topbar .hint kbd {
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 1px 5px;
+    font-family: inherit;
+  }
+
+  /* ===== Canvas area ===== */
+  .canvas-wrap {
+    position: relative;
+    overflow: auto;
+    background:
+      linear-gradient(var(--bg-elev) 1px, transparent 1px) 0 0 / 100% 40px,
+      var(--bg);
+  }
+  .canvas-stage {
+    position: relative;
+    margin: 24px auto 80px;
+    box-shadow: 0 8px 40px rgba(0,0,0,.5);
+    /* width/height set by JS after image load */
+  }
+  .canvas-stage img {
+    display: block;
+    width: 100%;   /* scaled by CSS to fit */
+    height: auto;
+    user-select: none;
+    -webkit-user-drag: none;
+  }
+
+  /* ===== Break lines ===== */
+  .break-line {
+    position: absolute;
+    left: 0; right: 0;
+    height: 0;
+    border-top: 2px dashed var(--accent);
+    cursor: ns-resize;
+    z-index: 3;
+    pointer-events: none;   /* hit handle takes the events */
+  }
+  .break-line.dragging { border-top-style: solid; }
+  .break-line .handle {
+    position: absolute;
+    left: 50%; top: -10px;
+    transform: translateX(-50%);
+    background: var(--accent);
+    color: #1a1106;
+    padding: 3px 10px 3px 8px;
+    border-radius: 3px;
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 600;
+    white-space: nowrap;
+    pointer-events: auto;
+    cursor: ns-resize;
+    user-select: none;
+    display: flex; align-items: center;
+    gap: 6px;
+    box-shadow: 0 2px 8px rgba(0,0,0,.4);
+  }
+  .break-line .handle .remove {
+    width: 12px; height: 12px;
+    background: rgba(26, 17, 6, 0.15);
+    border-radius: 2px;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700;
+    font-size: 11px;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .break-line .handle .remove:hover { background: rgba(26, 17, 6, 0.35); }
+
+  /* Ghost line while hovering canvas (shows where a click would land) */
+  .ghost-line {
+    position: absolute;
+    left: 0; right: 0;
+    height: 0;
+    border-top: 1.5px dashed var(--text-dim);
+    z-index: 2;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.1s;
+  }
+  .canvas-stage:hover .ghost-line { opacity: 0.6; }
+
+  /* Page-number badges at the CENTER of each "page" range */
+  .page-badge {
+    position: absolute;
+    left: 16px;
+    transform: translateY(-50%);
+    background: var(--bg-elev);
+    border: 1px solid var(--border-strong);
+    color: var(--text-dim);
+    padding: 4px 10px;
+    border-radius: 3px;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  /* ===== Right panel ===== */
+  .panel {
+    background: var(--bg);
+    border-left: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .panel-section {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .panel-section:last-child { border-bottom: none; }
+  .panel-section h3 {
+    margin: 0 0 8px;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-dim);
+    font-weight: 600;
+  }
+
+  /* Actions row (clear, reset, undo) */
+  .row-btns {
+    display: flex; gap: 6px;
+    flex-wrap: wrap;
+  }
+  .btn-ghost {
+    appearance: none;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 5px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-family: var(--mono);
+    cursor: pointer;
+    letter-spacing: 0.03em;
+  }
+  .btn-ghost:hover { background: var(--border); }
+  .btn-ghost:disabled {
+    color: var(--text-faint); cursor: not-allowed;
+    background: var(--bg-input);
+  }
+
+  /* Breaks list */
+  .lines-list {
+    max-height: 240px;
+    overflow-y: auto;
+    margin: 0; padding: 0;
+    list-style: none;
+  }
+  .lines-list li {
+    display: flex; align-items: center;
+    gap: 8px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+    font-family: var(--mono);
+    font-size: 11px;
+  }
+  .lines-list li:last-child { border-bottom: none; }
+  .lines-list .idx {
+    color: var(--text-faint); width: 22px;
+    text-align: right;
+  }
+  .lines-list input[type=number] {
+    flex: 1;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    color: var(--text);
+    padding: 3px 6px;
+    font-family: inherit;
+    font-size: inherit;
+    outline: none;
+    text-align: right;
+    width: 80px;
+  }
+  .lines-list input:focus { border-color: var(--accent); }
+  .lines-list .unit { color: var(--text-faint); font-size: 10px; }
+  .lines-list .del {
+    background: transparent;
+    border: none;
+    color: var(--text-faint);
+    font-size: 14px;
+    cursor: pointer;
+    padding: 0 4px;
+    line-height: 1;
+  }
+  .lines-list .del:hover { color: var(--danger); }
+  .lines-empty {
+    color: var(--text-faint);
+    font-size: 11px;
+    padding: 8px 0;
+    font-style: italic;
+  }
+
+  /* Export */
+  .export-wrap {
+    margin-top: auto;
+    padding: 14px 16px;
+    border-top: 1px solid var(--border);
+    background: var(--bg-elev);
+  }
+  .export-buttons {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .btn-export {
+    padding: 10px;
+    background: var(--accent);
+    color: #1a1106;
+    border: none;
+    border-radius: 6px;
+    font-weight: 600;
+    font-size: 13px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    gap: 8px;
+  }
+  .btn-export:hover { filter: brightness(1.08); }
+  .btn-export:disabled {
+    background: var(--border-strong); color: var(--text-dim); cursor: not-allowed;
+  }
+  .btn-export-png {
+    padding: 10px;
+    background: var(--bg-input);
+    color: var(--text);
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    font-weight: 600;
+    font-size: 13px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    gap: 8px;
+  }
+  .btn-export-png:hover { background: var(--border); border-color: var(--text-faint); }
+  .btn-export-png:disabled {
+    color: var(--text-faint); cursor: not-allowed;
+  }
+  .status {
+    margin-top: 8px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    min-height: 16px;
+  }
+  .status.err { color: var(--danger); }
+  .status.ok { color: var(--ok); }
+
+  /* Loading state while image decodes */
+  .loading-overlay {
+    position: fixed;
+    inset: 0;
+    background: var(--bg);
+    display: flex;
+    align-items: center; justify-content: center;
+    flex-direction: column;
+    gap: 12px;
+    z-index: 100;
+  }
+  .spinner {
+    width: 20px; height: 20px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<div class="loading-overlay" id="loading">
+  <div class="spinner"></div>
+  <div style="color: var(--text-dim); font-family: var(--mono); font-size: 12px;">
+    正在加载截图…
+  </div>
+</div>
+
+<div class="shell">
+  <div class="topbar">
+    <div class="brand">
+      <span class="dot"></span>Page2PDF<span class="sub">/ 分割线编辑器</span>
+    </div>
+    <div class="spacer"></div>
+    <div class="hint">
+      <kbd>点击</kbd>添加 · <kbd>拖动</kbd>调整 · <kbd>×</kbd>删除
+    </div>
+  </div>
+
+  <!-- Canvas -->
+  <div class="canvas-wrap" id="canvasWrap">
+    <div class="canvas-stage" id="stage">
+      <img id="cv" alt="" draggable="false" />
+      <div class="ghost-line" id="ghost"></div>
+      <!-- Break lines inserted dynamically -->
+      <!-- Page badges inserted dynamically -->
+    </div>
+  </div>
+
+  <!-- Right panel -->
+  <div class="panel">
+    <div class="panel-section">
+      <h3>分割线 <span style="color:var(--accent);margin-left:4px;" id="lineCount">0</span></h3>
+      <div class="row-btns">
+        <button class="btn-ghost" id="clearBtn">全部清除</button>
+        <button class="btn-ghost" id="suggestBtn">自动推荐</button>
+      </div>
+      <ul class="lines-list" id="linesList"></ul>
+      <div class="lines-empty" id="linesEmpty">还没有分割线。点击左侧截图添加一条。</div>
+    </div>
+
+    <div class="export-wrap">
+      <div class="export-buttons">
+        <button class="btn-export" id="exportBtn">
+          导出 PDF <span>→</span>
+        </button>
+        <button class="btn-export-png" id="exportPngBtn">
+          导出长图
+        </button>
+      </div>
+      <div class="status" id="status">就绪</div>
+    </div>
+  </div>
+</div>
+
+<script src="lib/jspdf.umd.min.js"></script>
+<script src="editor.js"></script>
+</body>
+</html>
